@@ -1,5 +1,4 @@
-
-import formidable from 'formidable';
+import { formidable } from 'formidable';
 import fs from 'fs';
 import { google } from 'googleapis';
 import { parse } from 'csv-parse/sync';
@@ -19,8 +18,14 @@ const auth = new google.auth.GoogleAuth({
 const sheetId = '1m-qaKoNWJdDWtl0bWuqnLEuF7KENQYRmspIX5BdBTHM';
 
 export default async function handler(req, res) {
-  const form = new formidable.IncomingForm({ keepExtensions: true });
+  const form = formidable({ keepExtensions: true });
+
   form.parse(req, async (err, fields, files) => {
+    if (err) {
+      console.error('Error parsing file:', err);
+      return res.status(500).json({ error: 'Failed to parse file' });
+    }
+
     const file = files.file[0];
     const tabName = fields.store[0];
 
@@ -35,13 +40,15 @@ export default async function handler(req, res) {
 
     const grouped = {};
     for (const row of data) {
-      const category = row['Product Category'];
+      const category = (row['Product Category'] || '').trim().toLowerCase();
       if (!grouped[category]) grouped[category] = [];
       grouped[category].push(row);
     }
 
     const finalRows = [];
-    for (const category of Object.keys(grouped)) {
+    const categoryKeys = Object.keys(grouped).sort();
+
+    categoryKeys.forEach((category, i) => {
       const sorted = grouped[category].sort((a, b) => b['Total Items Sold'] - a['Total Items Sold']);
       for (const item of sorted) {
         finalRows.push([
@@ -51,7 +58,7 @@ export default async function handler(req, res) {
         ]);
       }
       if (i !== categoryKeys.length - 1) finalRows.push(['', '', '']);
-    }
+    });
 
     const authClient = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: authClient });
@@ -62,10 +69,10 @@ export default async function handler(req, res) {
       valueInputOption: 'RAW',
       requestBody: {
         values: [
-  [`Processed at ${new Date().toLocaleString()}`],
-  ['Product Name', 'Product Category', 'Total Items Sold'],
-  ...finalRows
-],
+          [`Processed at ${new Date().toLocaleString()}`],
+          ['Product Name', 'Product Category', 'Total Items Sold'],
+          ...finalRows,
+        ],
       },
     });
 
