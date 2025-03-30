@@ -1,6 +1,6 @@
 
 {
-  "name": "drive-sales-vercel",
+  "name": "store-report-processor",
   "version": "1.0.0",
   "scripts": {
     "dev": "next dev",
