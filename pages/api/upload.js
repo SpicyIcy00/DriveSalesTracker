@@ -1,4 +1,3 @@
-
 import { formidable } from 'formidable';
 import fs from 'fs';
 import { google } from 'googleapis';
@@ -20,11 +19,9 @@ const sheetId = '1m-qaKoNWJdDWtl0bWuqnLEuF7KENQYRmspIX5BdBTHM';
 
 export default async function handler(req, res) {
   const form = formidable({ keepExtensions: true });
+
   form.parse(req, async (err, fields, files) => {
-    if (err) {
-      console.error('Error parsing file:', err);
-      return res.status(500).json({ error: 'Failed to parse file' });
-    }
+    if (err) return res.status(500).json({ error: 'File parsing failed' });
 
     const file = files.file[0];
     const tabName = fields.store[0];
@@ -40,56 +37,55 @@ export default async function handler(req, res) {
 
     const grouped = {};
     for (const row of data) {
-      const category = (row['Product Category'] || '').trim().toLowerCase();
+      const category = (row['Product Category'] || '').trim();
       if (!grouped[category]) grouped[category] = [];
       grouped[category].push(row);
     }
 
-    const finalRows = [];
-    const categoryKeys = Object.keys(grouped).sort();
-    categoryKeys.forEach((category, i) => {
+    const finalRows = [
+      ['Product Name', 'Product Category', 'Total Items Sold']
+    ];
+
+    const sortedCategories = Object.keys(grouped).sort();
+    sortedCategories.forEach((category, i) => {
       const sorted = grouped[category].sort((a, b) => b['Total Items Sold'] - a['Total Items Sold']);
       for (const item of sorted) {
         finalRows.push([
-          item['Product Name'],
-          item['Product Category'],
-          Math.floor(item['Total Items Sold']),
+          item['Product Name'] || '',
+          item['Product Category'] || '',
+          Math.floor(item['Total Items Sold'] || 0)
         ]);
       }
-      if (i !== categoryKeys.length - 1) finalRows.push(['', '', '']);
+      if (i !== sortedCategories.length - 1) {
+        finalRows.push(['', '', '']); // empty row between categories
+      }
     });
 
     const authClient = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: authClient });
 
-    // Clear the tab first
+    // Clear sheet before writing
     await sheets.spreadsheets.values.clear({
       spreadsheetId: sheetId,
       range: `${tabName}!A1:Z1000`,
     });
 
-    // Write new content
+    // Write data
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
       range: `${tabName}!A1`,
       valueInputOption: 'RAW',
       requestBody: {
-        values: [
-          [`Processed at ${new Date().toLocaleString()}`],
-          ['Product Name', 'Product Category', 'Total Items Sold'],
-          ...finalRows
-        ]
-      }
+        values: finalRows,
+      },
     });
 
-    // Get the sheet ID for the tab name
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: sheetId
-    });
+    // Get sheet ID
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
     const sheet = spreadsheet.data.sheets.find(s => s.properties.title === tabName);
     const sheetIdNum = sheet?.properties?.sheetId;
 
-    // Apply formatting
+    // Apply borders + alternating colors
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: sheetId,
       requestBody: {
@@ -105,10 +101,10 @@ export default async function handler(req, res) {
               cell: {
                 userEnteredFormat: {
                   borders: {
-                    top: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
-                    bottom: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
-                    left: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
-                    right: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } }
+                    top: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                    bottom: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                    left: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                    right: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } }
                   }
                 }
               },
@@ -121,6 +117,7 @@ export default async function handler(req, res) {
                 range: {
                   sheetId: sheetIdNum,
                   startRowIndex: 1,
+                  endRowIndex: finalRows.length,
                   startColumnIndex: 0,
                   endColumnIndex: 3
                 },
