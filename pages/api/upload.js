@@ -64,13 +64,13 @@ export default async function handler(req, res) {
     const authClient = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: authClient });
 
-    // Clear sheet before writing
+    // Clear old values
     await sheets.spreadsheets.values.clear({
       spreadsheetId: sheetId,
       range: `${tabName}!A1:Z1000`,
     });
 
-    // Write data
+    // Write data with headers
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
       range: `${tabName}!A1`,
@@ -80,16 +80,23 @@ export default async function handler(req, res) {
       },
     });
 
-    // Get sheet ID
+    // Get sheetId + banded ranges
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
     const sheet = spreadsheet.data.sheets.find(s => s.properties.title === tabName);
     const sheetIdNum = sheet?.properties?.sheetId;
+    const existingBands = sheet?.bandedRanges || [];
 
-    // Apply borders + alternating colors
+    // Delete existing banded rows
+    const deleteBandingRequests = existingBands.map(band => ({
+      deleteBanding: { bandedRangeId: band.bandedRangeId }
+    }));
+
+    // Apply borders and alternating rows
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: sheetId,
       requestBody: {
         requests: [
+          ...deleteBandingRequests,
           {
             repeatCell: {
               range: {
