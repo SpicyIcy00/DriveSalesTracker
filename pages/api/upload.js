@@ -1,4 +1,5 @@
-import { formidable } from 'formidable';
+
+import formidable from 'formidable';
 import fs from 'fs';
 import { google } from 'googleapis';
 import { parse } from 'csv-parse/sync';
@@ -18,14 +19,8 @@ const auth = new google.auth.GoogleAuth({
 const sheetId = '1m-qaKoNWJdDWtl0bWuqnLEuF7KENQYRmspIX5BdBTHM';
 
 export default async function handler(req, res) {
-  const form = formidable({ keepExtensions: true });
-
+  const form = new formidable.IncomingForm({ keepExtensions: true });
   form.parse(req, async (err, fields, files) => {
-    if (err) {
-      console.error('Error parsing file:', err);
-      return res.status(500).json({ error: 'Failed to parse file' });
-    }
-
     const file = files.file[0];
     const tabName = fields.store[0];
 
@@ -55,7 +50,7 @@ export default async function handler(req, res) {
           Math.floor(item['Total Items Sold']),
         ]);
       }
-      finalRows.push(['', '', '']); // Empty row between categories
+      if (i !== categoryKeys.length - 1) finalRows.push(['', '', '']);
     }
 
     const authClient = await auth.getClient();
@@ -66,7 +61,11 @@ export default async function handler(req, res) {
       range: `${tabName}!A1`,
       valueInputOption: 'RAW',
       requestBody: {
-        values: [[`Processed at ${new Date().toLocaleString()}`], [], ...finalRows],
+        values: [
+  [`Processed at ${new Date().toLocaleString()}`],
+  ['Product Name', 'Product Category', 'Total Items Sold'],
+  ...finalRows
+],
       },
     });
 
