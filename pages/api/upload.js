@@ -69,74 +69,94 @@ export default async function handler(req, res) {
           );
           finalRows.push([name.toString().trim(), cat.toString().trim(), sold]);
         }
-        finalRows.push(['', '', '']); // empty row after each category
+        finalRows.push(['', '', '']);
       }
 
       const authClient = await auth.getClient();
       const sheets = google.sheets({ version: 'v4', auth: authClient });
 
-      // Write values
+      // Write values to the sheet
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
         range: `${tabName}!A1`,
         valueInputOption: 'RAW',
-        requestBody: {
-          values: finalRows,
-        },
+        requestBody: { values: finalRows },
       });
 
-      // Apply styling
       const rowCount = finalRows.length;
+
+      // Step 1: Clear existing banding to avoid error
+      const { data: { sheets: sheetMeta } } = await sheets.spreadsheets.get({
+        spreadsheetId: sheetId,
+        ranges: [],
+        includeGridData: false,
+      });
+
+      const sheetInfo = sheetMeta.find(s => s.properties.title === tabName);
+      const sheetIdNum = sheetInfo.properties.sheetId;
+
+      const bandingRequests = [];
+
+      // If there's existing banding, remove it
+      if (sheetInfo.bandedRanges?.length) {
+        for (const band of sheetInfo.bandedRanges) {
+          bandingRequests.push({ deleteBanding: { bandedRangeId: band.bandedRangeId } });
+        }
+      }
+
+      // Add the new formatting requests
+      bandingRequests.push(
+        {
+          repeatCell: {
+            range: {
+              sheetId: sheetIdNum,
+              startRowIndex: 0,
+              endRowIndex: rowCount,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                borders: {
+                  top: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                  bottom: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                  left: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                  right: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                },
+              },
+            },
+            fields: 'userEnteredFormat.borders',
+          },
+        },
+        {
+          addBanding: {
+            bandedRange: {
+              range: {
+                sheetId: sheetIdNum,
+                startRowIndex: 1,
+                endRowIndex: rowCount,
+                startColumnIndex: 0,
+                endColumnIndex: 3,
+              },
+              rowProperties: {
+                headerColor: { red: 0.85, green: 0.9, blue: 0.95 },
+                firstBandColor: { red: 0.94, green: 0.94, blue: 0.94 },
+                secondBandColor: { red: 1, green: 1, blue: 1 },
+              },
+            },
+          },
+        }
+      );
+
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: sheetId,
         requestBody: {
-          requests: [
-            {
-              repeatCell: {
-                range: {
-                  sheetId: 0,
-                  startRowIndex: 0,
-                  endRowIndex: rowCount,
-                  startColumnIndex: 0,
-                  endColumnIndex: 3,
-                },
-                cell: {
-                  userEnteredFormat: {
-                    borders: {
-                      top: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                      bottom: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                      left: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                      right: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                    },
-                  },
-                },
-                fields: 'userEnteredFormat.borders',
-              },
-            },
-            {
-              addBanding: {
-                bandedRange: {
-                  range: {
-                    sheetId: 0,
-                    startRowIndex: 1,
-                    endRowIndex: rowCount,
-                    startColumnIndex: 0,
-                    endColumnIndex: 3,
-                  },
-                  rowProperties: {
-                    headerColor: { red: 0.85, green: 0.9, blue: 0.95 },
-                    firstBandColor: { red: 0.94, green: 0.94, blue: 0.94 },
-                    secondBandColor: { red: 1, green: 1, blue: 1 },
-                  },
-                },
-              },
-            },
-          ],
+          requests: bandingRequests,
         },
       });
 
       await fs.unlink(file.filepath);
-      res.status(200).json({ message: 'Uploaded and formatted successfully.' });
+      res.status(200).json({ message: 'Uploaded and formatted successfully!' });
     } catch (error) {
       console.error('Upload error:', error);
       res.status(500).json({ message: 'Upload failed', error });
