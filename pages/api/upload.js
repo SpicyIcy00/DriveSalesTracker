@@ -18,148 +18,112 @@ const auth = new google.auth.GoogleAuth({
 const sheetId = '1m-qaKoNWJdDWtl0bWuqnLEuF7KENQYRmspIX5BdBTHM';
 
 export default async function handler(req, res) {
-  const form = formidable({ keepExtensions: true });
-  form.parse(req, async (err, fields, files) => {
-    try {
-      const file = files.file[0];
-      const tabName = fields.store[0];
+  const form = formidable();
+  const [fields, files] = await form.parse(req);
 
-      let data = [];
-      if (file.originalFilename.endsWith('.csv')) {
-        const content = await fs.readFile(file.filepath);
-        data = parse(content, { columns: true });
-      } else {
-        const workbook = xlsx.readFile(file.filepath);
-        data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-      }
+  const file = files.file[0];
+  const tabName = fields.store[0];
 
-      const grouped = {};
-      for (const row of data) {
-        const category =
-          row['Product Category'] ||
-          row['product category'] ||
-          row['PRODUCT CATEGORY'] ||
-          'Uncategorized';
-        if (!grouped[category]) grouped[category] = [];
-        grouped[category].push(row);
-      }
+  let data = [];
+  if (file.originalFilename.endsWith('.csv')) {
+    const content = await fs.readFile(file.filepath);
+    data = parse(content, { columns: true });
+  } else {
+    const workbook = xlsx.readFile(file.filepath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    data = xlsx.utils.sheet_to_json(sheet);
+  }
 
-      const finalRows = [['Product Name', 'Product Category', 'Total Items Sold']];
-      for (const category of Object.keys(grouped)) {
-        const sorted = grouped[category].sort((a, b) => {
-          const aSold = Math.floor(
-            a['Total Items Sold'] || a['total items sold'] || a['TOTAL ITEMS SOLD'] || 0
-          );
-          const bSold = Math.floor(
-            b['Total Items Sold'] || b['total items sold'] || b['TOTAL ITEMS SOLD'] || 0
-          );
-          return bSold - aSold;
-        });
+  // Robust field name detection
+  const grouped = {};
+  for (const item of data) {
+    const nameKey = Object.keys(item).find(k => k.toLowerCase().includes('product') && k.toLowerCase().includes('name'));
+    const catKey = Object.keys(item).find(k => k.toLowerCase().includes('category'));
+    const soldKey = Object.keys(item).find(k => k.toLowerCase().includes('sold'));
 
-        for (const item of sorted) {
-          const name =
-            item['Product Name'] || item['product name'] || item['PRODUCT NAME'] || 'Unknown Product';
-          const cat =
-            item['Product Category'] ||
-            item['product category'] ||
-            item['PRODUCT CATEGORY'] ||
-            'Uncategorized';
-          const sold = Math.floor(
-            item['Total Items Sold'] || item['total items sold'] || item['TOTAL ITEMS SOLD'] || 0
-          );
-          finalRows.push([name.toString().trim(), cat.toString().trim(), sold]);
-        }
-        finalRows.push(['', '', '']);
-      }
+    const name = nameKey ? item[nameKey]?.toString().trim() : 'Unknown Product';
+    const cat = catKey ? item[catKey]?.toString().trim() : 'Uncategorized';
+    const sold = soldKey ? Math.floor(item[soldKey] || 0) : 0;
 
-      const authClient = await auth.getClient();
-      const sheets = google.sheets({ version: 'v4', auth: authClient });
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push({ name, cat, sold });
+  }
 
-      // Write values to the sheet
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
-        range: `${tabName}!A1`,
-        valueInputOption: 'RAW',
-        requestBody: { values: finalRows },
-      });
+  const finalRows = [['Product Name', 'Product Category', 'Total Items Sold']];
+  for (const category of Object.keys(grouped)) {
+    const sorted = grouped[category].sort((a, b) => b.sold - a.sold);
+    for (const item of sorted) {
+      finalRows.push([item.name, item.cat, item.sold]);
+    }
+    finalRows.push(['', '', '']); // Empty row between categories
+  }
 
-      const rowCount = finalRows.length;
+  const authClient = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: authClient });
 
-      // Step 1: Clear existing banding to avoid error
-      const { data: { sheets: sheetMeta } } = await sheets.spreadsheets.get({
-        spreadsheetId: sheetId,
-        ranges: [],
-        includeGridData: false,
-      });
+  // Write the values
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `${tabName}!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: finalRows },
+  });
 
-      const sheetInfo = sheetMeta.find(s => s.properties.title === tabName);
-      const sheetIdNum = sheetInfo.properties.sheetId;
+  // Get number of rows to apply styles
+  const rowCount = finalRows.length;
 
-      const bandingRequests = [];
-
-      // If there's existing banding, remove it
-      if (sheetInfo.bandedRanges?.length) {
-        for (const band of sheetInfo.bandedRanges) {
-          bandingRequests.push({ deleteBanding: { bandedRangeId: band.bandedRangeId } });
-        }
-      }
-
-      // Add the new formatting requests
-      bandingRequests.push(
-        {
-          repeatCell: {
-            range: {
-              sheetId: sheetIdNum,
-              startRowIndex: 0,
-              endRowIndex: rowCount,
-              startColumnIndex: 0,
-              endColumnIndex: 3,
-            },
-            cell: {
-              userEnteredFormat: {
-                borders: {
-                  top: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                  bottom: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                  left: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                  right: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
-                },
-              },
-            },
-            fields: 'userEnteredFormat.borders',
-          },
-        },
-        {
-          addBanding: {
-            bandedRange: {
+  // Apply alternating color bands and borders
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        requests: [
+          {
+            repeatCell: {
               range: {
-                sheetId: sheetIdNum,
-                startRowIndex: 1,
+                sheetId: 0,
+                startRowIndex: 0,
                 endRowIndex: rowCount,
                 startColumnIndex: 0,
                 endColumnIndex: 3,
               },
-              rowProperties: {
-                headerColor: { red: 0.85, green: 0.9, blue: 0.95 },
-                firstBandColor: { red: 0.94, green: 0.94, blue: 0.94 },
-                secondBandColor: { red: 1, green: 1, blue: 1 },
+              cell: {
+                userEnteredFormat: {
+                  borders: {
+                    top: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                    bottom: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                    left: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                    right: { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } },
+                  },
+                },
+              },
+              fields: 'userEnteredFormat.borders',
+            },
+          },
+          {
+            addBanding: {
+              bandedRange: {
+                range: {
+                  sheetId: 0,
+                  startRowIndex: 1,
+                  endRowIndex: rowCount,
+                  startColumnIndex: 0,
+                  endColumnIndex: 3,
+                },
+                rowProperties: {
+                  headerColor: { red: 0.85, green: 0.9, blue: 0.95 },
+                  firstBandColor: { red: 0.94, green: 0.94, blue: 0.94 },
+                  secondBandColor: { red: 1, green: 1, blue: 1 },
+                },
               },
             },
           },
-        }
-      );
+        ],
+      },
+    });
+  } catch (err) {
+    console.warn('Formatting failed:', err.message);
+  }
 
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: sheetId,
-        requestBody: {
-          requests: bandingRequests,
-        },
-      });
-
-      await fs.unlink(file.filepath);
-      res.status(200).json({ message: 'Uploaded and formatted successfully!' });
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({ message: 'Upload failed', error });
-    }
-  });
+  res.status(200).json({ message: 'Uploaded and formatted successfully' });
 }
