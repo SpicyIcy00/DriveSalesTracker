@@ -13,12 +13,20 @@ export default function Home() {
   const [stores, setStores] = useState(defaultStores.map(store => ({ ...store, file: null, status: "Not uploaded" })));
   const [updateSheets, setUpdateSheets] = useState(true);
 
-  const handleFileChange = (e, index) => {
+  const handleFileChange = (file, index) => {
     const newStores = [...stores];
-    newStores[index].file = e.target.files[0];
+    newStores[index].file = file;
     newStores[index].status = "Ready to upload";
     setStores(newStores);
   };
+
+  const handleDrop = (e, index) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileChange(file, index);
+  };
+
+  const handleDragOver = (e) => e.preventDefault();
 
   const handleProcess = async () => {
     for (let i = 0; i < stores.length; i++) {
@@ -90,16 +98,20 @@ export default function Home() {
                   />
                 </td>
                 <td className="p-3">
-                  <label className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-400 rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-100">
+                  <div
+                    onDrop={(e) => handleDrop(e, i)}
+                    onDragOver={handleDragOver}
+                    className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-400 rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-100"
+                  >
                     <Upload className="w-4 h-4" />
-                    <span>{store.file ? store.file.name : "Upload"}</span>
+                    <span>{store.file ? store.file.name : "Drag & Drop or Click to Upload"}</span>
                     <input
                       type="file"
                       accept=".csv,.xlsx,.xls"
-                      onChange={(e) => handleFileChange(e, i)}
+                      onChange={(e) => handleFileChange(e.target.files[0], i)}
                       className="hidden"
                     />
-                  </label>
+                  </div>
                 </td>
                 <td className="p-3 text-sm">{store.status}</td>
                 <td className="p-3">
