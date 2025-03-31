@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Upload, PlusCircle, Trash2, ArrowRightCircle } from "lucide-react";
+import { Upload, PlusCircle, Trash2, ArrowRightCircle, Loader2 } from "lucide-react";
 
 const defaultStores = [
   { name: "Rockwell", tab: "Rockwell" },
@@ -12,40 +12,46 @@ const defaultStores = [
 export default function Home() {
   const [stores, setStores] = useState(defaultStores.map(store => ({ ...store, file: null, status: "Not uploaded" })));
   const [updateSheets, setUpdateSheets] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleFileChange = (file, index) => {
+  const handleFileChange = (e, index) => {
     const newStores = [...stores];
-    newStores[index].file = file;
+    newStores[index].file = e.target.files[0];
     newStores[index].status = "Ready to upload";
     setStores(newStores);
   };
 
-  const handleDrop = (e, index) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) handleFileChange(file, index);
-  };
-
-  const handleDragOver = (e) => e.preventDefault();
-
   const handleProcess = async () => {
+    setIsProcessing(true);
+
+    const updatedStores = [...stores];
+
     for (let i = 0; i < stores.length; i++) {
       const store = stores[i];
       if (!store.file) continue;
+
       const formData = new FormData();
       formData.append("file", store.file);
       formData.append("sheetTab", store.tab);
       formData.append("update", updateSheets);
 
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
 
-      const newStores = [...stores];
-      newStores[i].status = res.ok ? "Uploaded" : "Failed";
-      setStores(newStores);
+        const result = await res.json();
+        updatedStores[i].status = res.ok && result.message === "Uploaded and formatted successfully"
+          ? "✅ Success"
+          : "❌ Failed";
+      } catch (err) {
+        updatedStores[i].status = "❌ Failed";
+      }
     }
+
+    setStores(updatedStores);
+    setIsProcessing(false);
   };
 
   const handleRemove = (index) => {
@@ -98,20 +104,16 @@ export default function Home() {
                   />
                 </td>
                 <td className="p-3">
-                  <div
-                    onDrop={(e) => handleDrop(e, i)}
-                    onDragOver={handleDragOver}
-                    className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-400 rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-100"
-                  >
+                  <label className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-400 rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-100">
                     <Upload className="w-4 h-4" />
-                    <span>{store.file ? store.file.name : "Drag & Drop or Click to Upload"}</span>
+                    <span>{store.file ? store.file.name : "Upload"}</span>
                     <input
                       type="file"
                       accept=".csv,.xlsx,.xls"
-                      onChange={(e) => handleFileChange(e.target.files[0], i)}
+                      onChange={(e) => handleFileChange(e, i)}
                       className="hidden"
                     />
-                  </div>
+                  </label>
                 </td>
                 <td className="p-3 text-sm">{store.status}</td>
                 <td className="p-3">
@@ -141,9 +143,10 @@ export default function Home() {
           <div className="flex gap-3">
             <button
               onClick={handleProcess}
-              className="flex items-center gap-2 bg-[#5f4b8b] text-white px-5 py-2 rounded-lg shadow hover:bg-[#4c3a70]"
+              disabled={isProcessing}
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg shadow text-white ${isProcessing ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#5f4b8b] hover:bg-[#4c3a70]'}`}
             >
-              <ArrowRightCircle className="w-5 h-5" /> Process All
+              {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRightCircle className="w-5 h-5" />} Process All
             </button>
             <button
               onClick={handleAddStore}

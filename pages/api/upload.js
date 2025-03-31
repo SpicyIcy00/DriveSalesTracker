@@ -1,6 +1,7 @@
 import formidable from "formidable";
 import fs from "fs/promises";
 import { google } from "googleapis";
+import path from "path";
 import { parse } from "csv-parse/sync";
 import xlsx from "xlsx";
 
@@ -10,117 +11,111 @@ export const config = {
   },
 };
 
+const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  keyFile: path.join(process.cwd(), "credentials.json"),
+  scopes: SCOPES,
 });
 
-const sheetId = "1m-qaKoNWJdDWtl0bWuqnLEuF7KENQYRmspIX5BdBTHM";
+function parseFile(filePath) {
+  const ext = path.extname(filePath);
+  if (ext === ".csv") {
+    return fs.readFile(filePath, "utf8").then((text) => parse(text, { columns: true }));
+  } else {
+    const workbook = xlsx.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return Promise.resolve(xlsx.utils.sheet_to_json(sheet));
+  }
+}
+
+function formatData(data) {
+  const cleaned = data
+    .filter((row) => row["Product Category"] && row["Product Name"] && row["Total Items Sold"])
+    .map((row) => ({
+      name: row["Product Name"],
+      category: row["Product Category"],
+      sold: parseInt(row["Total Items Sold"], 10),
+    }));
+
+  const grouped = {};
+  cleaned.forEach((item) => {
+    if (!grouped[item.category]) grouped[item.category] = [];
+    grouped[item.category].push(item);
+  });
+
+  const rows = [["Product Name", "Product Category", "Total Items Sold"]];
+  Object.keys(grouped).forEach((category) => {
+    const sorted = grouped[category].sort((a, b) => b.sold - a.sold);
+    sorted.forEach((item) => {
+      rows.push([item.name, item.category, item.sold]);
+    });
+    rows.push(["", "", ""]);
+  });
+
+  return rows;
+}
 
 export default async function handler(req, res) {
-  const form = formidable({});
+  const form = formidable({ multiples: false, keepExtensions: true });
+
   form.parse(req, async (err, fields, files) => {
+    if (err) return res.status(500).json({ error: "File upload failed." });
+
     try {
       const file = files.file[0];
       const tabName = fields.sheetTab[0];
 
-      let data = [];
-      if (file.originalFilename.endsWith(".csv")) {
-        const content = await fs.readFile(file.filepath);
-        data = parse(content, { columns: true });
-      } else {
-        const workbook = xlsx.readFile(file.filepath);
-        data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-      }
-
-      // Group and sort
-      const grouped = {};
-      for (const row of data) {
-        const category = row["Product Category"];
-        if (!grouped[category]) grouped[category] = [];
-        grouped[category].push(row);
-      }
-
-      const finalRows = [["Product Name", "Product Category", "Total Items Sold"]];
-      for (const category of Object.keys(grouped)) {
-        const sorted = grouped[category].sort((a, b) => b["Total Items Sold"] - a["Total Items Sold"]);
-        for (const item of sorted) {
-          finalRows.push([
-            item["Product Name"] || "Unknown Product",
-            item["Product Category"] || "Unknown",
-            Math.floor(item["Total Items Sold"] || 0),
-          ]);
-        }
-        finalRows.push(["", "", ""]); // empty row between categories
-      }
+      const rawData = await parseFile(file.filepath);
+      const formatted = formatData(rawData);
 
       const authClient = await auth.getClient();
       const sheets = google.sheets({ version: "v4", auth: authClient });
 
-      // Write to sheet
+      const spreadsheetId = process.env.SPREADSHEET_ID;
+
+      // Write values to the sheet
       await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
+        spreadsheetId,
         range: `${tabName}!A1`,
-        valueInputOption: "RAW",
-        requestBody: {
-          values: finalRows,
-        },
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: formatted },
       });
 
-      // Get sheetId for formatting
-      const meta = await sheets.spreadsheets.get({
-        spreadsheetId: sheetId,
-      });
-      const sheetInfo = meta.data.sheets.find(s => s.properties.title === tabName);
-      const sheetGID = sheetInfo.properties.sheetId;
-
-      // Delete existing banding
-      const bandingResponse = await sheets.spreadsheets.get({
-        spreadsheetId: sheetId,
+      // Remove all previous banding to prevent duplicate error
+      const { data: sheetMeta } = await sheets.spreadsheets.get({
+        spreadsheetId,
         ranges: [],
         includeGridData: false,
       });
 
-      const bandingsToDelete = (bandingResponse.data.sheets || [])
-        .flatMap(s => s.bandedRanges || [])
-        .filter(b => b.range.sheetId === sheetGID)
-        .map(b => ({
-          deleteBanding: {
-            bandedRangeId: b.bandedRangeId,
-          },
-        }));
+      const sheet = sheetMeta.sheets.find((s) => s.properties.title === tabName);
+      const sheetId = sheet.properties.sheetId;
 
-      // Add new formatting
-      const formatRequest = [
+      const requests = [
         {
-          repeatCell: {
+          updateBorders: {
             range: {
-              sheetId: sheetGID,
+              sheetId,
               startRowIndex: 0,
-              endRowIndex: finalRows.length,
+              endRowIndex: formatted.length,
               startColumnIndex: 0,
               endColumnIndex: 3,
             },
-            cell: {
-              userEnteredFormat: {
-                borders: {
-                  top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                  bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                  left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                  right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                },
-              },
-            },
-            fields: "userEnteredFormat.borders",
+            top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+            bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+            left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+            right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+            innerHorizontal: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+            innerVertical: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
           },
         },
         {
           addBanding: {
             bandedRange: {
               range: {
-                sheetId: sheetGID,
+                sheetId,
                 startRowIndex: 1,
-                endRowIndex: finalRows.length,
+                endRowIndex: formatted.length,
                 startColumnIndex: 0,
                 endColumnIndex: 3,
               },
@@ -134,19 +129,15 @@ export default async function handler(req, res) {
         },
       ];
 
-      // Combine and execute all requests
       await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: sheetId,
-        requestBody: {
-          requests: [...bandingsToDelete, ...formatRequest],
-        },
+        spreadsheetId,
+        requestBody: { requests },
       });
 
-      await fs.unlink(file.filepath);
-      res.status(200).json({ message: "Uploaded and formatted successfully" });
-    } catch (err) {
-      console.error("Upload error:", err);
-      res.status(500).json({ error: "Failed to process file" });
+      res.status(200).json({ message: "Success" });
+    } catch (e) {
+      console.error("Upload error:", e);
+      res.status(500).json({ error: "Upload failed" });
     }
   });
 }
