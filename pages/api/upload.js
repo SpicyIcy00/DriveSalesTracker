@@ -55,7 +55,7 @@ export default async function handler(req, res) {
           Math.floor(item['Total Items Sold']) || 0,
         ]);
       }
-      finalRows.push(['', '', '']); // empty row between categories
+      finalRows.push(['', '', '']); // empty row
     }
 
     const authClient = await auth.getClient();
@@ -68,12 +68,27 @@ export default async function handler(req, res) {
       requestBody: { values: finalRows },
     });
 
+    // Get sheetId for the tab name
+    const spreadsheetInfo = await sheets.spreadsheets.get({
+      spreadsheetId: sheetId,
+    });
+
+    const sheet = spreadsheetInfo.data.sheets.find(s => s.properties.title === tabName);
+    const sheetIdNum = sheet.properties.sheetId;
+
+    // Remove existing bandings
+    const existingBands = sheet.bandedRanges || [];
+    const deleteRequests = existingBands.map(band => ({
+      deleteBanding: { bandedRangeId: band.bandedRangeId }
+    }));
+
     const numDataRows = finalRows.length;
-    const requests = [
+    const formatRequests = [
+      ...deleteRequests,
       {
         repeatCell: {
           range: {
-            sheetId: 0,
+            sheetId: sheetIdNum,
             startRowIndex: 0,
             endRowIndex: numDataRows,
             startColumnIndex: 0,
@@ -96,7 +111,7 @@ export default async function handler(req, res) {
         addBanding: {
           bandedRange: {
             range: {
-              sheetId: 0,
+              sheetId: sheetIdNum,
               startRowIndex: 1,
               endRowIndex: numDataRows,
               startColumnIndex: 0,
@@ -114,9 +129,9 @@ export default async function handler(req, res) {
 
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: sheetId,
-      requestBody: { requests },
+      requestBody: { requests: formatRequests },
     });
 
-    return res.status(200).json({ message: 'Upload successful' });
+    res.status(200).json({ message: 'Upload successful with formatting' });
   });
 }
