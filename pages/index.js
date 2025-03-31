@@ -1,7 +1,5 @@
-// pages/index.js
-
 import React, { useState } from "react";
-import axios from "axios";
+import { Upload, PlusCircle, Trash2, ArrowRightCircle } from "lucide-react";
 
 const defaultStores = [
   { name: "Rockwell", tab: "Rockwell" },
@@ -12,128 +10,137 @@ const defaultStores = [
 ];
 
 export default function Home() {
-  const [stores, setStores] = useState(defaultStores);
-  const [statuses, setStatuses] = useState({});
-  const [autoUpdate, setAutoUpdate] = useState(true);
+  const [stores, setStores] = useState(defaultStores.map(store => ({ ...store, file: null, status: "Not uploaded" })));
+  const [updateSheets, setUpdateSheets] = useState(true);
 
-  const handleFileChange = (index, file) => {
-    const updated = [...stores];
-    updated[index].file = file;
-    setStores(updated);
-    setStatuses((prev) => ({ ...prev, [index]: "Ready" }));
+  const handleFileChange = (e, index) => {
+    const newStores = [...stores];
+    newStores[index].file = e.target.files[0];
+    newStores[index].status = "Ready to upload";
+    setStores(newStores);
   };
 
-  const processAll = async () => {
+  const handleProcess = async () => {
     for (let i = 0; i < stores.length; i++) {
       const store = stores[i];
       if (!store.file) continue;
-
-      setStatuses((prev) => ({ ...prev, [i]: "Uploading..." }));
       const formData = new FormData();
-      formData.append("store", store.name);
       formData.append("file", store.file);
+      formData.append("sheetTab", store.tab);
+      formData.append("update", updateSheets);
 
-      try {
-        await axios.post("/api/upload", formData);
-        setStatuses((prev) => ({ ...prev, [i]: "✅ Success" }));
-      } catch (err) {
-        setStatuses((prev) => ({ ...prev, [i]: "❌ Failed" }));
-      }
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const newStores = [...stores];
+      newStores[i].status = res.ok ? "Uploaded" : "Failed";
+      setStores(newStores);
     }
   };
 
-  const addStore = () => {
-    const name = prompt("Store name?");
-    const tab = prompt("Google Sheets tab name?");
-    if (name && tab) {
-      setStores([...stores, { name, tab }]);
-    }
+  const handleRemove = (index) => {
+    const newStores = stores.filter((_, i) => i !== index);
+    setStores(newStores);
   };
 
-  const deleteStore = (index) => {
-    const updated = [...stores];
-    updated.splice(index, 1);
-    setStores(updated);
-    const newStatuses = { ...statuses };
-    delete newStatuses[index];
-    setStatuses(newStatuses);
+  const handleAddStore = () => {
+    setStores([...stores, { name: "", tab: "", file: null, status: "Not uploaded" }]);
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white px-6 py-10">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">📊 Sales Data Processor</h1>
+    <div className="min-h-screen bg-[#fef6ec] py-10 px-6 text-[#3a2b2b]">
+      <div className="max-w-5xl mx-auto bg-white border border-[#e9d5c9] rounded-xl shadow-lg p-8">
+        <h1 className="text-2xl font-bold text-center mb-6">CSV Sales Data Organizer and Formatting</h1>
 
-        <div className="bg-slate-800 border border-blue-400 text-blue-100 p-4 rounded mb-6">
-          📂 Upload sales data files for each store. The processed data will be automatically updated in the corresponding Google Sheet tab.
-        </div>
-
-        <label className="inline-flex items-center mb-4">
-          <input
-            type="checkbox"
-            checked={autoUpdate}
-            onChange={() => setAutoUpdate(!autoUpdate)}
-            className="mr-2"
-          />
-          Update Google Sheets after processing
-        </label>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm border border-slate-600">
-            <thead className="bg-slate-700">
-              <tr>
-                <th className="p-2 border">Store</th>
-                <th className="p-2 border">Sheet Tab</th>
-                <th className="p-2 border">Upload File</th>
-                <th className="p-2 border">Status</th>
-                <th className="p-2 border">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stores.map((store, index) => (
-                <tr key={index} className="even:bg-slate-800 odd:bg-slate-700">
-                  <td className="p-2 border font-semibold">{store.name}</td>
-                  <td className="p-2 border">{store.tab}</td>
-                  <td className="p-2 border">
+        <table className="w-full border border-[#e5cab9] rounded overflow-hidden mb-6">
+          <thead>
+            <tr className="bg-[#fdf0e3] text-left">
+              <th className="p-3">Store</th>
+              <th className="p-3">Sheet Tab</th>
+              <th className="p-3">File</th>
+              <th className="p-3">Status</th>
+              <th className="p-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {stores.map((store, i) => (
+              <tr key={i} className="border-t border-[#e5cab9]">
+                <td className="p-3">
+                  <input
+                    className="bg-transparent border-b border-gray-300 w-full focus:outline-none"
+                    value={store.name}
+                    onChange={(e) => {
+                      const newStores = [...stores];
+                      newStores[i].name = e.target.value;
+                      setStores(newStores);
+                    }}
+                  />
+                </td>
+                <td className="p-3">
+                  <input
+                    className="bg-transparent border-b border-gray-300 w-full focus:outline-none"
+                    value={store.tab}
+                    onChange={(e) => {
+                      const newStores = [...stores];
+                      newStores[i].tab = e.target.value;
+                      setStores(newStores);
+                    }}
+                  />
+                </td>
+                <td className="p-3">
+                  <label className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-400 rounded cursor-pointer text-sm text-gray-600 hover:bg-gray-100">
+                    <Upload className="w-4 h-4" />
+                    <span>{store.file ? store.file.name : "Upload"}</span>
                     <input
                       type="file"
-                      onChange={(e) => handleFileChange(index, e.target.files[0])}
-                      className="text-sm"
+                      accept=".csv,.xlsx,.xls"
+                      onChange={(e) => handleFileChange(e, i)}
+                      className="hidden"
                     />
-                  </td>
-                  <td className="p-2 border">{statuses[index] || "No file selected"}</td>
-                  <td className="p-2 border">
-                    <button
-                      onClick={() => deleteStore(index)}
-                      className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded"
-                    >
-                      ✖ Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </label>
+                </td>
+                <td className="p-3 text-sm">{store.status}</td>
+                <td className="p-3">
+                  <button
+                    onClick={() => handleRemove(i)}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
-        <div className="mt-6 flex gap-4">
-          <button
-            onClick={processAll}
-            className="bg-indigo-500 hover:bg-indigo-600 px-6 py-2 rounded text-white font-semibold"
-          >
-            ⚙️ Process All Files
-          </button>
-          <button
-            onClick={addStore}
-            className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-white"
-          >
-            ➕ Add Store
-          </button>
-        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="form-checkbox rounded"
+              checked={updateSheets}
+              onChange={(e) => setUpdateSheets(e.target.checked)}
+            />
+            <span className="text-sm">Update Google Sheets after processing</span>
+          </div>
 
-        <footer className="mt-10 text-sm text-center text-gray-400">
-          Sales Data Processor © 2025
-        </footer>
+          <div className="flex gap-3">
+            <button
+              onClick={handleProcess}
+              className="flex items-center gap-2 bg-[#5f4b8b] text-white px-5 py-2 rounded-lg shadow hover:bg-[#4c3a70]"
+            >
+              <ArrowRightCircle className="w-5 h-5" /> Process All
+            </button>
+            <button
+              onClick={handleAddStore}
+              className="flex items-center gap-2 bg-[#b5c99a] text-black px-5 py-2 rounded-lg shadow hover:bg-[#a2b584]"
+            >
+              <PlusCircle className="w-5 h-5" /> Add Store
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
