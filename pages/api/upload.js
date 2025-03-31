@@ -22,7 +22,8 @@ export default async function handler(req, res) {
   const [fields, files] = await form.parse(req);
 
   const file = files.file[0];
-  const tabName = fields.store[0];
+  const tabName = fields.sheetTab[0];
+
 
   let data = [];
   if (file.originalFilename.endsWith('.csv')) {
