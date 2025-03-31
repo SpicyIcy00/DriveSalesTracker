@@ -46,30 +46,35 @@ export default async function handler(req, res) {
         rawData = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
       }
 
+      // Clean & group data
       const grouped = {};
       for (const row of rawData) {
-        const category = row['Product Category'];
+        const name = (row['Product Name'] || '').toString().trim();
+        const category = (row['Product Category'] || '').toString().trim();
+        const sold = parseInt(row['Total Items Sold']);
+
+        if (!name || !category || isNaN(sold)) continue;
+
         if (!grouped[category]) grouped[category] = [];
-        grouped[category].push(row);
+        grouped[category].push({ name, category, sold });
       }
 
-      const finalRows = [
-        ['Product Name', 'Product Category', 'Total Items Sold']
-      ];
+      const finalRows = [['Product Name', 'Product Category', 'Total Items Sold']];
 
       for (const category of Object.keys(grouped)) {
-        const sorted = grouped[category].sort((a, b) => b['Total Items Sold'] - a['Total Items Sold']);
+        const sorted = grouped[category].sort((a, b) => b.sold - a.sold);
         for (const item of sorted) {
-          finalRows.push([
-            item['Product Name'],
-            item['Product Category'],
-            Math.floor(item['Total Items Sold']),
-          ]);
+          finalRows.push([item.name, item.category, item.sold]);
         }
-        finalRows.push(['', '', '']);
+        finalRows.push(['', '', '']); // Empty row between categories
       }
 
-      finalRows.unshift([`Processed at ${new Date().toLocaleString()}`, '', '']);
+      // Insert timestamp row at the very top
+      const output = [
+        [`Processed at ${new Date().toLocaleString()}`, '', ''],
+        [],
+        ...finalRows
+      ];
 
       const authClient = await auth.getClient();
       const sheets = google.sheets({ version: 'v4', auth: authClient });
@@ -79,15 +84,14 @@ export default async function handler(req, res) {
         range: `${tabName}!A1`,
         valueInputOption: 'RAW',
         requestBody: {
-          values: finalRows,
+          values: output,
         },
       });
 
-      res.status(200).json({ message: 'Upload successful and formatted!' });
+      res.status(200).json({ message: 'Upload successful and cleanly formatted!' });
     } catch (e) {
       console.error("Upload error:", e);
       res.status(500).json({ error: "Error processing the file" });
     }
   });
 }
-
