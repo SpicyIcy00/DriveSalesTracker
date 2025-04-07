@@ -1,144 +1,167 @@
-// pages/index.js
-import React, { useState } from 'react';
-import axios from 'axios';
-
-const defaultStores = [
-  { name: 'Rockwell', tab: 'Rockwell' },
-  { name: 'Greenhills', tab: 'Greenhills' },
-  { name: 'Magnolia', tab: 'Magnolia' },
-  { name: 'North Edsa', tab: 'North Edsa' },
-  { name: 'Fairview', tab: 'Fairview' },
-];
+import React, { useState } from "react";
 
 export default function Home() {
-  const [stores, setStores] = useState(defaultStores);
-  const [statuses, setStatuses] = useState({});
-  const [autoUpdate, setAutoUpdate] = useState(true);
+  const [stores, setStores] = useState([
+    { name: "Rockwell", tab: "Rockwell", file: null, status: "Not uploaded" },
+    { name: "Greenhills", tab: "Greenhills", file: null, status: "Not uploaded" },
+    { name: "Magnolia", tab: "Magnolia", file: null, status: "Not uploaded" },
+    { name: "North Edsa", tab: "North Edsa", file: null, status: "Not uploaded" },
+    { name: "Fairview", tab: "Fairview", file: null, status: "Not uploaded" },
+  ]);
 
-  const handleFileChange = (index, file) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleFileChange = (file, index) => {
     const updated = [...stores];
     updated[index].file = file;
     setStores(updated);
-    setStatuses((prev) => ({ ...prev, [index]: 'Ready' }));
+  };
+
+  const handleDrop = (e, index) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileChange(file, index);
   };
 
   const processAll = async () => {
-    for (let i = 0; i < stores.length; i++) {
-      const store = stores[i];
-      if (!store.file) continue;
+    setLoading(true);
+    const updatedStores = [...stores];
 
-      setStatuses((prev) => ({ ...prev, [i]: 'Uploading...' }));
+    for (let i = 0; i < updatedStores.length; i++) {
+      const store = updatedStores[i];
+
+      if (!store.file) {
+        updatedStores[i].status = "No file";
+        continue;
+      }
+
       const formData = new FormData();
-      formData.append('store', store.name);
-      formData.append('file', store.file);
+      formData.append("file", store.file);
+      formData.append("sheetTab", store.tab);
 
       try {
-        await axios.post('/api/upload', formData);
-        setStatuses((prev) => ({ ...prev, [i]: '✅ Success' }));
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (res.ok) {
+          updatedStores[i].status = "Success";
+        } else {
+          updatedStores[i].status = "Failed";
+        }
       } catch (err) {
-        setStatuses((prev) => ({ ...prev, [i]: '❌ Failed' }));
+        updatedStores[i].status = "Failed";
       }
     }
+
+    setStores(updatedStores);
+    setLoading(false);
   };
 
-  const addStore = () => {
-    const name = prompt('Store name?');
-    const tab = prompt('Google Sheets tab name?');
-    if (name && tab) {
-      setStores([...stores, { name, tab }]);
-    }
-  };
-
-  const deleteStore = (index) => {
+  const removeStore = (index) => {
     const updated = [...stores];
     updated.splice(index, 1);
     setStores(updated);
-    const newStatuses = { ...statuses };
-    delete newStatuses[index];
-    setStatuses(newStatuses);
+  };
+
+  const addStore = () => {
+    setStores([
+      ...stores,
+      { name: "", tab: "", file: null, status: "Not uploaded" },
+    ]);
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white px-6 py-10">
-      <h1 className="text-3xl font-bold mb-6">📊 Sales Data Processor</h1>
+    <div className="min-h-screen bg-[#0f172a] text-white py-12 px-4">
+      <div className="max-w-5xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6 flex items-center gap-2">
+          📊 Sales Data Processor
+        </h1>
 
-      <div className="bg-blue-100 text-blue-900 px-6 py-4 rounded mb-6">
-        📂 Upload sales data files for each store. The processed data will be automatically updated in the corresponding Google Sheet tab.
-      </div>
+        <p className="bg-blue-900 p-4 rounded mb-4 text-sm border border-blue-500">
+          📥 Upload sales data files for each store. The processed data will be automatically updated in the corresponding Google Sheet tab.
+        </p>
 
-      <div className="mb-4">
-        <label className="inline-flex items-center space-x-2">
-          <input
-            type="checkbox"
-            checked={autoUpdate}
-            onChange={() => setAutoUpdate(!autoUpdate)}
-            className="form-checkbox text-indigo-600"
-          />
+        <label className="flex items-center gap-2 mb-4">
+          <input type="checkbox" checked readOnly />
           <span>Update Google Sheets after processing</span>
         </label>
-      </div>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm border border-slate-700 rounded overflow-hidden">
-          <thead className="bg-slate-800">
+        <table className="w-full table-auto text-sm border border-gray-500 mb-4">
+          <thead className="bg-gray-700">
             <tr>
-              <th className="p-2 border border-slate-700">Store</th>
-              <th className="p-2 border border-slate-700">Sheet Tab</th>
-              <th className="p-2 border border-slate-700">Upload File</th>
-              <th className="p-2 border border-slate-700">Status</th>
-              <th className="p-2 border border-slate-700">Actions</th>
+              <th className="px-4 py-2 text-left">Store</th>
+              <th className="px-4 py-2 text-left">Sheet Tab</th>
+              <th className="px-4 py-2 text-left">Upload File</th>
+              <th className="px-4 py-2 text-left">Status</th>
+              <th className="px-4 py-2 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
             {stores.map((store, index) => (
-              <tr
-                key={index}
-                className={`${index % 2 === 0 ? 'bg-slate-800' : 'bg-slate-700'}`}
-              >
-                <td className="p-2 border border-slate-700">{store.name}</td>
-                <td className="p-2 border border-slate-700">{store.tab}</td>
-                <td className="p-2 border border-slate-700">
+              <tr key={index} className="border-t border-gray-600">
+                <td className="px-4 py-2">{store.name}</td>
+                <td className="px-4 py-2">{store.tab}</td>
+                <td
+                  className="px-4 py-2 border border-dashed border-gray-400 rounded text-center cursor-pointer"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => handleDrop(e, index)}
+                >
                   <input
                     type="file"
-                    onChange={(e) => handleFileChange(index, e.target.files[0])}
-                    className="w-full text-white"
+                    className="hidden"
+                    id={`file-${index}`}
+                    onChange={(e) =>
+                      handleFileChange(e.target.files[0], index)
+                    }
                   />
+                  <label htmlFor={`file-${index}`} className="cursor-pointer">
+                    📤 {store.file ? store.file.name : "Choose File"}
+                  </label>
                 </td>
-                <td className="p-2 border border-slate-700">
-                  {statuses[index] || 'No file selected'}
+                <td className="px-4 py-2">
+                  {store.status === "Success" ? "✅" : store.status === "Failed" ? "❌ Failed" : store.status}
                 </td>
-                <td className="p-2 border border-slate-700">
+                <td className="px-4 py-2">
                   <button
-                    onClick={() => deleteStore(index)}
-                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded"
+                    onClick={() => removeStore(index)}
+                    className="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-white"
                   >
-                    ✖ Remove
+                    ❌ Remove
                   </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
 
-      <div className="mt-6 flex gap-4">
-        <button
-          onClick={processAll}
-          className="bg-indigo-600 hover:bg-indigo-700 px-6 py-2 rounded text-white font-semibold"
-        >
-          ⚙️ Process All Files
-        </button>
-        <button
-          onClick={addStore}
-          className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-white font-semibold"
-        >
-          ➕ Add Store
-        </button>
-      </div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={processAll}
+            disabled={loading}
+            className={`px-6 py-2 rounded font-medium flex items-center gap-2 ${
+              loading ? "bg-gray-500 cursor-wait" : "bg-indigo-600 hover:bg-indigo-700"
+            }`}
+          >
+            ⚙️ {loading ? "Processing..." : "Process All Files"}
+            {loading && (
+              <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
+            )}
+          </button>
 
-      <footer className="mt-10 text-sm text-center text-gray-500">
-        Sales Data Processor © 2025
-      </footer>
+          <button
+            onClick={addStore}
+            className="bg-green-600 hover:bg-green-700 px-6 py-2 rounded font-medium text-white"
+          >
+            ➕ Add Store
+          </button>
+        </div>
+
+        <footer className="text-center mt-16 text-gray-400 text-sm">
+          Sales Data Processor © 2025
+        </footer>
+      </div>
     </div>
   );
 }
