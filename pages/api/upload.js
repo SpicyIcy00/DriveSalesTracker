@@ -11,12 +11,6 @@ export const config = {
   },
 };
 
-const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  scopes: SCOPES,
-});
-
 function parseFile(filePath) {
   const ext = path.extname(filePath);
   if (ext === ".csv") {
@@ -43,7 +37,10 @@ function formatData(data) {
     grouped[item.category].push(item);
   });
 
-  const sortedCategories = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  const sortedCategories = Object.keys(grouped).sort((a, b) =>
+    a.toLowerCase().localeCompare(b.toLowerCase())
+  );
+
   const rows = [["Product Name", "Product Category", "Total Items Sold"]];
   sortedCategories.forEach((category) => {
     const sortedItems = grouped[category].sort((a, b) => b.sold - a.sold);
@@ -60,7 +57,7 @@ export default async function handler(req, res) {
   const form = formidable({ multiples: false, keepExtensions: true });
 
   form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "File upload failed." });
+    if (err) return res.status(500).json({ error: "Upload failed (form parse error)" });
 
     const file = files.file?.[0];
     const tabName = fields.sheetTab?.[0];
@@ -74,27 +71,29 @@ export default async function handler(req, res) {
       const rawData = await parseFile(file.filepath);
       const formatted = formatData(rawData);
 
-      const authClient = await auth.getClient();
-      const sheets = google.sheets({ version: "v4", auth: authClient });
+      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+      });
+
+      const sheets = google.sheets({ version: "v4", auth });
       const spreadsheetId = process.env.SPREADSHEET_ID;
 
+      // Upload values
       await sheets.spreadsheets.values.update({
         spreadsheetId,
         range: `${tabName}!A1`,
         valueInputOption: "USER_ENTERED",
-        requestBody: {
-          values: formatted,
-        },
+        requestBody: { values: formatted },
       });
 
-      const sheetMeta = await sheets.spreadsheets.get({
-        spreadsheetId,
-        includeGridData: false,
-      });
+      // Get the sheet ID
+      const meta = await sheets.spreadsheets.get({ spreadsheetId });
+      const sheet = meta.data.sheets.find((s) => s.properties.title === tabName);
+      const sheetId = sheet.properties.sheetId;
 
-      const sheet = sheetMeta.data.sheets.find((s) => s.properties.title === tabName);
-      const sheetId = sheet?.properties?.sheetId;
-
+      // Format with borders only
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
         requestBody: {
@@ -125,10 +124,10 @@ export default async function handler(req, res) {
         },
       });
 
-      res.status(200).json({ message: "✅ Success" });
+      return res.status(200).json({ message: "Success" });
     } catch (e) {
       console.error("❌ Upload error:", e);
-      res.status(500).json({ error: "Upload failed" });
+      return res.status(500).json({ error: "Upload error" });
     }
   });
 }
