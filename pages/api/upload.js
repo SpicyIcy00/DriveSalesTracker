@@ -11,10 +11,21 @@ export const config = {
   },
 };
 
+// Authenticate using env variable for credentials
+const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+const auth = new google.auth.GoogleAuth({
+  credentials,
+  scopes: SCOPES,
+});
+
+// Parse either CSV or XLSX
 function parseFile(filePath) {
   const ext = path.extname(filePath);
   if (ext === ".csv") {
-    return fs.readFile(filePath, "utf8").then((text) => parse(text, { columns: true }));
+    return fs.readFile(filePath, "utf8").then((text) =>
+      parse(text, { columns: true })
+    );
   } else {
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -22,9 +33,15 @@ function parseFile(filePath) {
   }
 }
 
+// Format & organize data alphabetically by category
 function formatData(data) {
   const cleaned = data
-    .filter((row) => row["Product Category"] && row["Product Name"] && row["Total Items Sold"])
+    .filter(
+      (row) =>
+        row["Product Category"] &&
+        row["Product Name"] &&
+        row["Total Items Sold"]
+    )
     .map((row) => ({
       name: row["Product Name"],
       category: row["Product Category"],
@@ -37,12 +54,14 @@ function formatData(data) {
     grouped[item.category].push(item);
   });
 
-  const sortedCategories = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-  const rows = [["Product Name", "Product Category", "Total Items Sold"]];
+  const sortedCategories = Object.keys(grouped).sort((a, b) =>
+    a.toLowerCase().localeCompare(b.toLowerCase())
+  );
 
+  const rows = [["Product Name", "Product Category", "Total Items Sold"]];
   sortedCategories.forEach((category) => {
-    const sortedItems = grouped[category].sort((a, b) => b.sold - a.sold);
-    sortedItems.forEach((item) => {
+    const sorted = grouped[category].sort((a, b) => b.sold - a.sold);
+    sorted.forEach((item) => {
       rows.push([item.name, item.category, item.sold]);
     });
     rows.push(["", "", ""]);
@@ -51,16 +70,15 @@ function formatData(data) {
   return rows;
 }
 
+// Main handler
 export default async function handler(req, res) {
   const form = formidable({ multiples: false, keepExtensions: true });
 
   form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "File upload failed." });
+    const file = files?.file?.[0];
+    const tabName = fields?.sheetTab?.[0];
 
-    const file = files.file?.[0];
-    const tabName = fields.sheetTab?.[0];
-
-    if (!file || !tabName) {
+    if (err || !file || !tabName) {
       console.error("❌ Missing file or sheetTab", { file, tabName });
       return res.status(400).json({ error: "Missing file or sheetTab" });
     }
@@ -69,14 +87,9 @@ export default async function handler(req, res) {
       const rawData = await parseFile(file.filepath);
       const formatted = formatData(rawData);
 
-      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-      });
-
       const authClient = await auth.getClient();
       const sheets = google.sheets({ version: "v4", auth: authClient });
+
       const spreadsheetId = process.env.SPREADSHEET_ID;
 
       await sheets.spreadsheets.values.update({
@@ -86,8 +99,14 @@ export default async function handler(req, res) {
         requestBody: { values: formatted },
       });
 
-      const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId });
-      const sheet = sheetMeta.data.sheets.find((s) => s.properties.title === tabName);
+      const sheetMeta = await sheets.spreadsheets.get({
+        spreadsheetId,
+        includeGridData: false,
+      });
+
+      const sheet = sheetMeta.data.sheets.find(
+        (s) => s.properties.title === tabName
+      );
       const sheetId = sheet.properties.sheetId;
 
       await sheets.spreadsheets.batchUpdate({
