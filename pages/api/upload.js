@@ -12,10 +12,8 @@ export const config = {
 };
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS); // ✅ Get from env
-
 const auth = new google.auth.GoogleAuth({
-  credentials,
+  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
   scopes: SCOPES,
 });
 
@@ -86,13 +84,12 @@ export default async function handler(req, res) {
         requestBody: { values: formatted },
       });
 
-      const { data: sheetMeta } = await sheets.spreadsheets.get({
+      const sheetMeta = await sheets.spreadsheets.get({
         spreadsheetId,
-        ranges: [],
         includeGridData: false,
       });
 
-      const sheet = sheetMeta.sheets.find((s) => s.properties.title === tabName);
+      const sheet = sheetMeta.data.sheets.find((s) => s.properties.title === tabName);
       const sheetId = sheet.properties.sheetId;
 
       const requests = [
@@ -128,7 +125,7 @@ export default async function handler(req, res) {
       res.status(200).json({ message: "Success" });
     } catch (e) {
       console.error("Upload error:", e);
-      res.status(500).json({ error: "Upload failed" });
+      res.status(500).json({ error: "Upload error" });
     }
   });
 }
