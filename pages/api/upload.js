@@ -11,21 +11,16 @@ export const config = {
   },
 };
 
-// Authenticate using env variable for credentials
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 const auth = new google.auth.GoogleAuth({
-  credentials,
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: SCOPES,
 });
 
-// Parse either CSV or XLSX
 function parseFile(filePath) {
   const ext = path.extname(filePath);
   if (ext === ".csv") {
-    return fs.readFile(filePath, "utf8").then((text) =>
-      parse(text, { columns: true })
-    );
+    return fs.readFile(filePath, "utf8").then((text) => parse(text, { columns: true }));
   } else {
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -33,15 +28,9 @@ function parseFile(filePath) {
   }
 }
 
-// Format & organize data alphabetically by category
 function formatData(data) {
   const cleaned = data
-    .filter(
-      (row) =>
-        row["Product Category"] &&
-        row["Product Name"] &&
-        row["Total Items Sold"]
-    )
+    .filter((row) => row["Product Category"] && row["Product Name"] && row["Total Items Sold"])
     .map((row) => ({
       name: row["Product Name"],
       category: row["Product Category"],
@@ -54,14 +43,11 @@ function formatData(data) {
     grouped[item.category].push(item);
   });
 
-  const sortedCategories = Object.keys(grouped).sort((a, b) =>
-    a.toLowerCase().localeCompare(b.toLowerCase())
-  );
-
+  const sortedCategories = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
   const rows = [["Product Name", "Product Category", "Total Items Sold"]];
   sortedCategories.forEach((category) => {
-    const sorted = grouped[category].sort((a, b) => b.sold - a.sold);
-    sorted.forEach((item) => {
+    const sortedItems = grouped[category].sort((a, b) => b.sold - a.sold);
+    sortedItems.forEach((item) => {
       rows.push([item.name, item.category, item.sold]);
     });
     rows.push(["", "", ""]);
@@ -70,15 +56,16 @@ function formatData(data) {
   return rows;
 }
 
-// Main handler
 export default async function handler(req, res) {
   const form = formidable({ multiples: false, keepExtensions: true });
 
   form.parse(req, async (err, fields, files) => {
-    const file = files?.file?.[0];
-    const tabName = fields?.sheetTab?.[0];
+    if (err) return res.status(500).json({ error: "File upload failed." });
 
-    if (err || !file || !tabName) {
+    const file = files.file?.[0];
+    const tabName = fields.sheetTab?.[0];
+
+    if (!file || !tabName) {
       console.error("❌ Missing file or sheetTab", { file, tabName });
       return res.status(400).json({ error: "Missing file or sheetTab" });
     }
@@ -89,14 +76,15 @@ export default async function handler(req, res) {
 
       const authClient = await auth.getClient();
       const sheets = google.sheets({ version: "v4", auth: authClient });
-
       const spreadsheetId = process.env.SPREADSHEET_ID;
 
       await sheets.spreadsheets.values.update({
         spreadsheetId,
         range: `${tabName}!A1`,
         valueInputOption: "USER_ENTERED",
-        requestBody: { values: formatted },
+        requestBody: {
+          values: formatted,
+        },
       });
 
       const sheetMeta = await sheets.spreadsheets.get({
@@ -104,10 +92,8 @@ export default async function handler(req, res) {
         includeGridData: false,
       });
 
-      const sheet = sheetMeta.data.sheets.find(
-        (s) => s.properties.title === tabName
-      );
-      const sheetId = sheet.properties.sheetId;
+      const sheet = sheetMeta.data.sheets.find((s) => s.properties.title === tabName);
+      const sheetId = sheet?.properties?.sheetId;
 
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
@@ -139,7 +125,7 @@ export default async function handler(req, res) {
         },
       });
 
-      res.status(200).json({ message: "Success" });
+      res.status(200).json({ message: "✅ Success" });
     } catch (e) {
       console.error("❌ Upload error:", e);
       res.status(500).json({ error: "Upload failed" });
