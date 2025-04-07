@@ -68,8 +68,8 @@ export default async function handler(req, res) {
     if (err) return res.status(500).json({ error: "File upload failed." });
 
     try {
-      const file = files.file[0];
-      const tabName = fields.sheetTab[0];
+      const file = Array.isArray(files.file) ? files.file[0] : files.file;
+      const tabName = Array.isArray(fields.sheetTab) ? fields.sheetTab[0] : fields.sheetTab;
 
       const rawData = await parseFile(file.filepath);
       const formatted = formatData(rawData);
@@ -83,9 +83,7 @@ export default async function handler(req, res) {
         spreadsheetId,
         range: `${tabName}!A1`,
         valueInputOption: "USER_ENTERED",
-        requestBody: {
-          values: formatted,
-        },
+        requestBody: { values: formatted },
       });
 
       const sheetMeta = await sheets.spreadsheets.get({
