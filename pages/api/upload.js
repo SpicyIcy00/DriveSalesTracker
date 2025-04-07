@@ -53,20 +53,27 @@ export default async function handler(req, res) {
   const form = formidable({ multiples: false, keepExtensions: true });
 
   form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "File upload failed." });
+    if (err) {
+      console.error("❌ Form parse error:", err);
+      return res.status(500).json({ error: "File upload failed." });
+    }
+
+    console.log("📝 Parsed fields:", fields);
+    console.log("📝 Parsed files:", files);
 
     try {
       const file = files.file?.[0];
       const tabName = fields.sheetTab?.[0];
 
       if (!file || !tabName) {
+        console.error("❌ Missing file or sheetTab", { file, tabName });
         return res.status(400).json({ error: "Missing file or sheetTab." });
       }
 
       const rawData = await parseFile(file.filepath);
       const formatted = formatData(rawData);
 
-      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS || "{}");
       const auth = new google.auth.GoogleAuth({
         credentials,
         scopes: ["https://www.googleapis.com/auth/spreadsheets"],
@@ -76,6 +83,7 @@ export default async function handler(req, res) {
       const sheets = google.sheets({ version: "v4", auth: authClient });
 
       const spreadsheetId = process.env.SPREADSHEET_ID;
+      console.log("📄 Writing to spreadsheet:", spreadsheetId, "Tab:", tabName);
 
       await sheets.spreadsheets.values.update({
         spreadsheetId,
