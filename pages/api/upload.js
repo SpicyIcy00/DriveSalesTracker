@@ -12,17 +12,17 @@ export const config = {
 };
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS); // ✅ Get from env
+
 const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(process.cwd(), "credentials.json"),
+  credentials,
   scopes: SCOPES,
 });
 
 function parseFile(filePath) {
   const ext = path.extname(filePath);
   if (ext === ".csv") {
-    return fs.readFile(filePath, "utf8").then((text) =>
-      parse(text, { columns: true })
-    );
+    return fs.readFile(filePath, "utf8").then((text) => parse(text, { columns: true }));
   } else {
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -51,8 +51,8 @@ function formatData(data) {
 
   const rows = [["Product Name", "Product Category", "Total Items Sold"]];
   sortedCategories.forEach((category) => {
-    const sortedItems = grouped[category].sort((a, b) => b.sold - a.sold);
-    sortedItems.forEach((item) => {
+    const sorted = grouped[category].sort((a, b) => b.sold - a.sold);
+    sorted.forEach((item) => {
       rows.push([item.name, item.category, item.sold]);
     });
     rows.push(["", "", ""]);
@@ -68,8 +68,8 @@ export default async function handler(req, res) {
     if (err) return res.status(500).json({ error: "File upload failed." });
 
     try {
-      const file = Array.isArray(files.file) ? files.file[0] : files.file;
-      const tabName = Array.isArray(fields.sheetTab) ? fields.sheetTab[0] : fields.sheetTab;
+      const file = files.file[0];
+      const tabName = fields.sheetTab[0];
 
       const rawData = await parseFile(file.filepath);
       const formatted = formatData(rawData);
@@ -86,44 +86,43 @@ export default async function handler(req, res) {
         requestBody: { values: formatted },
       });
 
-      const sheetMeta = await sheets.spreadsheets.get({
+      const { data: sheetMeta } = await sheets.spreadsheets.get({
         spreadsheetId,
+        ranges: [],
         includeGridData: false,
       });
 
-      const sheet = sheetMeta.data.sheets.find(
-        (s) => s.properties.title === tabName
-      );
+      const sheet = sheetMeta.sheets.find((s) => s.properties.title === tabName);
       const sheetId = sheet.properties.sheetId;
+
+      const requests = [
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: formatted.length,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                borders: {
+                  top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                  bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                  left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                  right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                },
+              },
+            },
+            fields: "userEnteredFormat.borders",
+          },
+        },
+      ];
 
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
-        requestBody: {
-          requests: [
-            {
-              repeatCell: {
-                range: {
-                  sheetId,
-                  startRowIndex: 0,
-                  endRowIndex: formatted.length,
-                  startColumnIndex: 0,
-                  endColumnIndex: 3,
-                },
-                cell: {
-                  userEnteredFormat: {
-                    borders: {
-                      top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                      bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                      left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                      right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                    },
-                  },
-                },
-                fields: "userEnteredFormat.borders",
-              },
-            },
-          ],
-        },
+        requestBody: { requests },
       });
 
       res.status(200).json({ message: "Success" });
