@@ -1,5 +1,3 @@
-// pages/api/upload.js
-
 import formidable from "formidable";
 import fs from "fs/promises";
 import { google } from "googleapis";
@@ -7,7 +5,6 @@ import path from "path";
 import { parse } from "csv-parse/sync";
 import xlsx from "xlsx";
 
-// Enable file upload parsing
 export const config = {
   api: {
     bodyParser: false,
@@ -17,9 +14,7 @@ export const config = {
 function parseFile(filePath) {
   const ext = path.extname(filePath);
   if (ext === ".csv") {
-    return fs.readFile(filePath, "utf8").then((text) =>
-      parse(text, { columns: true })
-    );
+    return fs.readFile(filePath, "utf8").then((text) => parse(text, { columns: true }));
   } else {
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -29,12 +24,7 @@ function parseFile(filePath) {
 
 function formatData(data) {
   const cleaned = data
-    .filter(
-      (row) =>
-        row["Product Category"] &&
-        row["Product Name"] &&
-        row["Total Items Sold"]
-    )
+    .filter((row) => row["Product Category"] && row["Product Name"] && row["Total Items Sold"])
     .map((row) => ({
       name: row["Product Name"],
       category: row["Product Category"],
@@ -47,14 +37,12 @@ function formatData(data) {
     grouped[item.category].push(item);
   });
 
-  const sortedCategories = Object.keys(grouped).sort((a, b) =>
-    a.toLowerCase().localeCompare(b.toLowerCase())
-  );
-
+  const sortedCategories = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
   const rows = [["Product Name", "Product Category", "Total Items Sold"]];
+
   sortedCategories.forEach((category) => {
-    const sorted = grouped[category].sort((a, b) => b.sold - a.sold);
-    sorted.forEach((item) => {
+    const sortedItems = grouped[category].sort((a, b) => b.sold - a.sold);
+    sortedItems.forEach((item) => {
       rows.push([item.name, item.category, item.sold]);
     });
     rows.push(["", "", ""]);
@@ -67,12 +55,7 @@ export default async function handler(req, res) {
   const form = formidable({ multiples: false, keepExtensions: true });
 
   form.parse(req, async (err, fields, files) => {
-    console.log("📝 Parsed fields:", fields);
-    console.log("📝 Parsed files:", files);
-
-    if (err) {
-      return res.status(500).json({ error: "File upload failed." });
-    }
+    if (err) return res.status(500).json({ error: "File upload failed." });
 
     const file = files.file?.[0];
     const tabName = fields.sheetTab?.[0];
@@ -94,10 +77,8 @@ export default async function handler(req, res) {
 
       const authClient = await auth.getClient();
       const sheets = google.sheets({ version: "v4", auth: authClient });
-
       const spreadsheetId = process.env.SPREADSHEET_ID;
 
-      // Write data to sheet
       await sheets.spreadsheets.values.update({
         spreadsheetId,
         range: `${tabName}!A1`,
@@ -105,18 +86,8 @@ export default async function handler(req, res) {
         requestBody: { values: formatted },
       });
 
-      // Get sheet ID for styling
-      const sheetMeta = await sheets.spreadsheets.get({
-        spreadsheetId,
-        includeGridData: false,
-      });
-
-      const sheet = sheetMeta.data.sheets.find(
-        (s) => s.properties.title === tabName
-      );
-
-      if (!sheet) throw new Error("Sheet not found");
-
+      const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId });
+      const sheet = sheetMeta.data.sheets.find((s) => s.properties.title === tabName);
       const sheetId = sheet.properties.sheetId;
 
       await sheets.spreadsheets.batchUpdate({
@@ -152,7 +123,7 @@ export default async function handler(req, res) {
       res.status(200).json({ message: "Success" });
     } catch (e) {
       console.error("❌ Upload error:", e);
-      res.status(500).json({ error: "Upload error" });
+      res.status(500).json({ error: "Upload failed" });
     }
   });
 }
