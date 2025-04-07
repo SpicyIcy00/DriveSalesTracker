@@ -23,24 +23,24 @@ export default function Home() {
     setStatuses((prev) => ({ ...prev, [index]: "Ready" }));
   };
 
-  const processAll = async () => {
-    for (let i = 0; i < stores.length; i++) {
-      const store = stores[i];
-      if (!store.file) continue;
+ const processAll = async () => {
+  for (let i = 0; i < stores.length; i++) {
+    const store = stores[i];
+    if (!store.file) continue;
 
-      setStatuses((prev) => ({ ...prev, [i]: "Uploading..." }));
-      const formData = new FormData();
-      formData.append("store", store.name);
-      formData.append("file", store.file);
+    setStatuses((prev) => ({ ...prev, [i]: "Uploading..." }));
+    const formData = new FormData();
+    formData.append("sheetTab", store.tab);  // Changed from "store" to "sheetTab" and from store.name to store.tab
+    formData.append("file", store.file);
 
-      try {
-        await axios.post("/api/upload", formData);
-        setStatuses((prev) => ({ ...prev, [i]: "✅ Success" }));
-      } catch (err) {
-        setStatuses((prev) => ({ ...prev, [i]: "❌ Failed" }));
-      }
+    try {
+      await axios.post("/api/upload", formData);
+      setStatuses((prev) => ({ ...prev, [i]: "✅ Success" }));
+    } catch (err) {
+      setStatuses((prev) => ({ ...prev, [i]: "❌ Failed" }));
     }
-  };
+  }
+};
 
   const addStore = () => {
     const name = prompt("Store name?");
