@@ -12,15 +12,19 @@ export const config = {
 };
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
+  credentials,
   scopes: SCOPES,
 });
 
 function parseFile(filePath) {
   const ext = path.extname(filePath);
   if (ext === ".csv") {
-    return fs.readFile(filePath, "utf8").then((text) => parse(text, { columns: true }));
+    return fs.readFile(filePath, "utf8").then((text) =>
+      parse(text, { columns: true })
+    );
   } else {
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -30,7 +34,12 @@ function parseFile(filePath) {
 
 function formatData(data) {
   const cleaned = data
-    .filter((row) => row["Product Category"] && row["Product Name"] && row["Total Items Sold"])
+    .filter(
+      (row) =>
+        row["Product Category"] &&
+        row["Product Name"] &&
+        row["Total Items Sold"]
+    )
     .map((row) => ({
       name: row["Product Name"],
       category: row["Product Category"],
@@ -81,51 +90,55 @@ export default async function handler(req, res) {
         spreadsheetId,
         range: `${tabName}!A1`,
         valueInputOption: "USER_ENTERED",
-        requestBody: { values: formatted },
+        requestBody: {
+          values: formatted,
+        },
       });
 
-      const sheetMeta = await sheets.spreadsheets.get({
+      // Get sheet ID
+      const meta = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
       });
-
-      const sheet = sheetMeta.data.sheets.find((s) => s.properties.title === tabName);
+      const sheet = meta.data.sheets.find(
+        (s) => s.properties.title === tabName
+      );
       const sheetId = sheet.properties.sheetId;
-
-      const requests = [
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 0,
-              endRowIndex: formatted.length,
-              startColumnIndex: 0,
-              endColumnIndex: 3,
-            },
-            cell: {
-              userEnteredFormat: {
-                borders: {
-                  top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                  bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                  left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                  right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                },
-              },
-            },
-            fields: "userEnteredFormat.borders",
-          },
-        },
-      ];
 
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
-        requestBody: { requests },
+        requestBody: {
+          requests: [
+            {
+              repeatCell: {
+                range: {
+                  sheetId,
+                  startRowIndex: 0,
+                  endRowIndex: formatted.length,
+                  startColumnIndex: 0,
+                  endColumnIndex: 3,
+                },
+                cell: {
+                  userEnteredFormat: {
+                    borders: {
+                      top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                      bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                      left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                      right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                    },
+                  },
+                },
+                fields: "userEnteredFormat.borders",
+              },
+            },
+          ],
+        },
       });
 
       res.status(200).json({ message: "Success" });
     } catch (e) {
       console.error("Upload error:", e);
-      res.status(500).json({ error: "Upload error" });
+      res.status(500).json({ error: "Upload failed" });
     }
   });
 }
