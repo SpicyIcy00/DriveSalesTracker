@@ -1,9 +1,9 @@
 import formidable from "formidable";
+import fs from "fs/promises";
 import { google } from "googleapis";
+import path from "path";
 import { parse } from "csv-parse/sync";
 import xlsx from "xlsx";
-import path from "path";
-import fs from "fs/promises";
 
 export const config = {
   api: {
@@ -11,12 +11,17 @@ export const config = {
   },
 };
 
+const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+const auth = new google.auth.GoogleAuth({
+  credentials,
+  scopes: SCOPES,
+});
+
 function parseFile(filePath) {
   const ext = path.extname(filePath);
   if (ext === ".csv") {
-    return fs.readFile(filePath, "utf8").then((text) =>
-      parse(text, { columns: true })
-    );
+    return fs.readFile(filePath, "utf8").then((text) => parse(text, { columns: true }));
   } else {
     const workbook = xlsx.readFile(filePath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -26,12 +31,7 @@ function parseFile(filePath) {
 
 function formatData(data) {
   const cleaned = data
-    .filter(
-      (row) =>
-        row["Product Category"] &&
-        row["Product Name"] &&
-        row["Total Items Sold"]
-    )
+    .filter((row) => row["Product Category"] && row["Product Name"] && row["Total Items Sold"])
     .map((row) => ({
       name: row["Product Name"],
       category: row["Product Category"],
@@ -64,29 +64,25 @@ export default async function handler(req, res) {
   const form = formidable({ multiples: false, keepExtensions: true });
 
   form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "File upload failed." });
+    if (err) return res.status(500).json({ error: "Form parsing failed" });
 
     try {
-      const file = files?.file;
-      const tabName = fields?.sheetTab?.[0];
+      const fileArray = files.file;
+      const tabArray = fields.sheetTab;
 
-      if (!file || !tabName) {
-        return res.status(400).json({ error: "Missing file or sheet tab." });
+      if (!fileArray || !tabArray) {
+        return res.status(400).json({ error: "Missing file or sheetTab" });
       }
 
-      const filePath = Array.isArray(file) ? file[0].filepath : file.filepath;
+      const file = fileArray[0];
+      const tabName = tabArray[0];
 
-      const rawData = await parseFile(filePath);
+      const rawData = await parseFile(file.filepath);
       const formatted = formatData(rawData);
-
-      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-      });
 
       const authClient = await auth.getClient();
       const sheets = google.sheets({ version: "v4", auth: authClient });
+
       const spreadsheetId = process.env.SPREADSHEET_ID;
 
       await sheets.spreadsheets.values.update({
@@ -96,44 +92,42 @@ export default async function handler(req, res) {
         requestBody: { values: formatted },
       });
 
-      const { data: meta } = await sheets.spreadsheets.get({
+      const { data: sheetMeta } = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
       });
 
-      const sheet = meta.sheets.find(
-        (s) => s.properties.title === tabName
-      );
+      const sheet = sheetMeta.sheets.find((s) => s.properties.title === tabName);
       const sheetId = sheet.properties.sheetId;
+
+      const requests = [
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: formatted.length,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                borders: {
+                  top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                  bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                  left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                  right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
+                },
+              },
+            },
+            fields: "userEnteredFormat.borders",
+          },
+        },
+      ];
 
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
-        requestBody: {
-          requests: [
-            {
-              repeatCell: {
-                range: {
-                  sheetId,
-                  startRowIndex: 0,
-                  endRowIndex: formatted.length,
-                  startColumnIndex: 0,
-                  endColumnIndex: 3,
-                },
-                cell: {
-                  userEnteredFormat: {
-                    borders: {
-                      top: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                      bottom: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                      left: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                      right: { style: "SOLID", color: { red: 0, green: 0, blue: 0 } },
-                    },
-                  },
-                },
-                fields: "userEnteredFormat.borders",
-              },
-            },
-          ],
-        },
+        requestBody: { requests },
       });
 
       res.status(200).json({ message: "Success" });
